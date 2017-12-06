@@ -40,6 +40,9 @@ if (isDev) {
     publicPath: '/public', // 静态路径
     historyApiFallback: { // 指定404请求返回的文件
       index: '/public/index.html'
+    },
+    proxy: {
+      '/api': 'http://localhost:3333' // 客户端请求代理到服务端
     }
   }
   config.plugins.push(new webpack.HotModuleReplacementPlugin()) // react-hot-loader@next

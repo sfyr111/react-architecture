@@ -1,30 +1,34 @@
 const axios = require('axios')
+const querystring = require('query-string')
 
 const baseUrl = 'http://cnodejs.org/api/v1'
 
 module.exports = function (req, res, next) {
   const path = req.path
   const user = req.session.user || {}
-  const needdAccessToken = req.query.needAccessToken
+  const needAccessToken = req.query.needAccessToken
 
-  if (needdAccessToken && user.accessToken) {
+  if (needAccessToken && !user.accessToken) {
     res.status(401).send({
       success: false,
       msg: 'need login'
     })
   }
 
-  const query = Object.assign({}, req.query)
+  const query = Object.assign({}, req.query, {
+    accesstoken: (needAccessToken && req.method === 'GET') ? user.accessToken : '' // get 放query
+  })
   if (query.needAccessToken) delete query.needAccessToken
 
   axios(`${baseUrl}${path}`, {
     method: req.method,
     params: query,
-    data: Object.assign({}, req.body, {
-      accesstoken: user.accessToken,
-    }),
+    // {'accesstoken': 'xxx} => 'accesstoken=xxx'
+    data: querystring.stringify(Object.assign({}, req.body, {
+      accesstoken: (needAccessToken && req.method === 'POST') ? user.accessToken : '', // post 放body
+    })),
     headers: {
-      'Content-Type': 'application/x-www.form-urlencode'
+      'Content-Type': 'application/x-www-form-urlencoded'
     }
   })
     .then(resp => {
