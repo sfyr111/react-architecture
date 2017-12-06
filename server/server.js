@@ -1,11 +1,14 @@
 const express = require('express')
 const ReactSSR = require('react-dom/server')
+const favicon = require('serve-favicon')
 const fs = require('fs')
 const path = require('path')
 
 const isDev = process.env.NODE_ENV === 'development'
 
 const app = express()
+
+app.use(favicon(path.join(__dirname, '../favicon.ico')))
 
 if (!isDev) { // 生产环境ssr
   const serverEntry = require('../dist/server-entry').default // 因为server-entry 是export default 出来的
