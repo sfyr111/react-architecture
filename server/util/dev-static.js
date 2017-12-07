@@ -3,10 +3,8 @@ const webpack = require('webpack')
 const path = require('path')
 const MemoryFs = require('memory-fs') // 在内存上读写文件
 const proxy = require('http-proxy-middleware')
-const serialize = require('serialize-javascript') // 序列化对象为字符串，stringify？
-const ejs = require('ejs')
-const asyncBootstrap = require('react-async-bootstrapper').default
-const ReactDomServer = require('react-dom/server')
+
+const serverRender = require('./server-render')
 
 const serverConfig = require('../../build/webpack.config.server')
 
@@ -19,8 +17,23 @@ const getTemplate = () => {
       .catch(reject)
   })
 }
+// const Module = module.constructor // hack => module.exports
 
-const Module = module.constructor // hack => module.exports
+const NativeModule = require('module')
+const vm = require('vm')
+
+// module模块 warp 把代码包裹为 (function (exports, require, module, __filename, __dirname) { ...bundle code }
+const getModuleFromString = (bundle, filename) => {
+  const m = { exports: {}}
+  const wrapper = NativeModule.wrap(bundle)
+  const script = new vm.Script(wrapper, {
+    filename: filename,
+    displayErrors: true
+  })
+  const result = script.runInThisContext()
+  result.call(m.exports, m.exports, require, m)
+  return m
+}
 
 const mfs = new MemoryFs()
 
@@ -28,7 +41,7 @@ const serverCompiler = webpack(serverConfig) // 启动一个webpack
 // compiler
 serverCompiler.outputFileSystem = mfs // 把distw文件夹写到内存中而不是dist磁盘上outputFileSytstem 配置fs 读写文件的方式,
 
-let serverBundle, createStoreMap
+let serverBundle
 // watch 每次更新都会更新
 serverCompiler.watch({}, (err, /* webpack building info */stats) => {
   if (err) throw err
@@ -41,48 +54,22 @@ serverCompiler.watch({}, (err, /* webpack building info */stats) => {
     serverConfig.output.filename
   )
   const bundle = mfs.readFileSync(bundlePath, 'utf-8') // stream
-  const m = new Module()
-  m._compile(bundle, 'server-entry.js') // Module 解析 bundle stream, 指定文件名
-  serverBundle = m.exports.default // 模块里丢出来的
-  createStoreMap = m.exports.createStoreMap // mobx
+  const m = getModuleFromString(bundle, 'server-entry.js')
+  serverBundle = m.exports // 模块里丢出来的
 })
 
-// 用来同步客户端的store
-const getStoreState = (stores) => {
-  return Object.keys(stores).reduce((result, storeName) => {
-    result[storeName] = stores[storeName].toJson()
-    return result
-  }, {}) // 直接返回个字典对象
-}
 
 module.exports = app => {
   app.use('/public', proxy({
     target: 'http://localhost:8888'
   }))
-  app.get('*', function (req, res) {
+  app.get('*', function (req, res, next) {
+    if (!serverBundle) {
+      return res.send('waiting for compile, refresh later')
+    }
     getTemplate().then(template => {
-
-      const routerContext = {}
-      const stores = createStoreMap()
-      const app = serverBundle(stores, routerContext, req.url)
-
-      asyncBootstrap(app).then(() => {
-        if (routerContext.url) { // '/' 重定向到 'list' 解决'/' 时的数据渲染
-          res.status(302).setHeader('Location', routerContext.url)
-          res.end()
-          return
-        }
-        const state = getStoreState(stores)
-        const content = ReactDomServer.renderToString(app)
-
-        const html = ejs.render(template, {
-          appString: content,
-          initialState: serialize(state),
-        })
-
-        res.send(html)
-        // res.send(template.replace('<!-- app -->', content))
-      })
+      return serverRender(serverBundle, template, req, res)
     })
+      .catch(next)
   })
 }

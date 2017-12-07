@@ -2,7 +2,7 @@ const express = require('express')
 const favicon = require('serve-favicon')
 const bodyParser = require('body-parser')
 const session = require('express-session')
-const ReactSSR = require('react-dom/server')
+const serverRender = require('./util/server-render')
 const fs = require('fs')
 const path = require('path')
 
@@ -27,19 +27,23 @@ app.use('/api/user', require('./util/handle-login'))
 app.use('/api', require('./util/proxy'))
 
 if (!isDev) { // 生产环境ssr
-  const serverEntry = require('../dist/server-entry').default // 因为server-entry 是export default 出来的
-  const template = fs.readFileSync(path.join(__dirname, '../dist/index.html'), 'utf8')
+  const serverEntry = require('../dist/server-entry') // 因为server-entry 是export default 出来的
+  const template = fs.readFileSync(path.join(__dirname, '../dist/server.ejs'), 'utf8')
   // 在webpack.config.js, /public 返回静态文件
   app.use('/public', express.static(path.join(__dirname, '../dist')))
-  app.get('*', function (req, res) {
-    const appString = ReactSSR.renderToString(serverEntry)
-
-    res.send(template.replace('<!-- app -->', appString))
+  app.get('*', function (req, res, next) {
+    serverRender(serverEntry, template, req, res).catch(next)
   })
 } else {
   const devStatic = require('./util/dev-static')
   devStatic(app) // 开发环境下，想怎样就怎样- -
 }
+
+// 错误处理函数
+app.use(function (error, req, res, next) {
+  console.error(error)
+  res.status(500).send(error)
+})
 
 app.listen(3333, function () {
   console.log('server is listening on 3333')
